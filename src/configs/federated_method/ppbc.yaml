@@ -1,0 +1,6 @@
+_target_: federated_methods.ppbc.ppbc.PPBC
+epoch_method: random
+iter_k: 5
+iterations: 1
+theta: 0.1
+gamma: 1

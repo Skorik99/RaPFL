@@ -1,0 +1,15 @@
+_target_: federated_methods.RaP.rap.RaP
+iterations: 3
+epoch_method: random
+theta: 0.15
+gamma: 0.5
+start_point: uniform # "previous", "best"
+end_point: origin
+num_opt_epochs: 10
+mirror_gamma: 1
+ts_momentum: 0.05
+proba: 0.1 # H^k ~ Geom(proba)
+bant_epochs: 0 # Need to be implemented
+ppbc_moment: 0.2 # alpha testing
+surrogate_sending: jointly # -- if we wanna send surrogate with gradients and "in_end" if at the end of an epoch
+autobant_epochs: 10 # how long we need to calclulate weights (it needs for paper)
