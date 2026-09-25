@@ -1,5 +1,5 @@
 
-# A Byzantine-Robust Algorithm for Federated Learning with Partial Participation
+# Byzantine-Robust Federated Learning across Selection Strategies and Partial-Participation Regimes
 
 ## Table of contents
 0. [Running Experiments](docs/experiments.md) -- Run the command to get reproducibility
@@ -25,6 +25,8 @@ python src/federated_datasets/dataset_download.py --dataset-type cifar100 --down
 Run `python -h src/federated_datasets/dataset_download.py` for details.
 
 ### ⚙️ Experiment Setups
+
+The proposed RaP method is implemented in `/home/skorik/RaPFL/src/federated_methods/RaP`.
 
 #### 🔄 Standard [Federated Averaging](https://arxiv.org/pdf/1602.05629) on CIFAR-10
 ```bash

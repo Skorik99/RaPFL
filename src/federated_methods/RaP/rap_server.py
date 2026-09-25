@@ -8,6 +8,8 @@ import torch
 
 
 class RapServer(AutoBANTServer):
+    """Server-side trial-function weighting for RaP Algorithm 1."""
+
     def __init__(
         self,
         cfg,
@@ -37,6 +39,8 @@ class RapServer(AutoBANTServer):
         self.best_surrogate = None
 
     def _init_trust_model(self):
+        # Current-gradient candidates for Algorithm 1, line 15. Only clients
+        # selected for this inner iteration contribute to this trial model.
         self.grad_model = AutoBANTModel2d(
             self.cfg,
             self.global_model.state_dict(),
@@ -44,6 +48,8 @@ class RapServer(AutoBANTServer):
             self.device,
             init_trust_scores=None,
         )
+        # Stored surrogate-gradient candidates for Algorithm 1, line 11. The
+        # final_errors mapping supplies one stored epoch summary per client.
         self.surrogate_model = AutoBANTModel2d(
             self.cfg,
             self.global_model.state_dict(),
@@ -57,11 +63,16 @@ class RapServer(AutoBANTServer):
 
     def _count_trust_score_manager(self, type):
         if type == "surrogate":
+            # Approximately solve the surrogate-gradient argmin over the simplex
+            # from Algorithm 1, line 11, using the Appendix D mirror-descent
+            # procedure implemented in AutoBANTServer._count_trust_score().
             self.trust_model = self.surrogate_model
             self.start_trust_scores = self.surrogate_start_scores
             ts = self._count_trust_score()
             self.surrogate_start_scores = self.start_trust_scores
         else:
+            # Approximately solve the current-gradient argmin over the simplex
+            # from Algorithm 1, line 15, using the same mirror-descent procedure.
             self.trust_model = self.grad_model
             self.start_trust_scores = self.grad_start_scores
             ts = self._count_trust_score()
@@ -120,8 +131,8 @@ class RapServer(AutoBANTServer):
             return ts
 
     def _check_w(self, ts):
-        # Here we evaluate w weights since weights computing is so unstable.
-        # Now we just compare loss of newly calculated weights with the best weights.
+        # Stabilize the surrogate solution from Algorithm 1, line 11, by retaining
+        # whichever candidate gives the lower trusted trial loss.
         if self.best_surrogate is None:
             print("First init of w weights")
             self.best_surrogate = copy.deepcopy(ts)

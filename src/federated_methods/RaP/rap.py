@@ -7,6 +7,8 @@ import numpy as np
 
 
 class RaP(PPBC):
+    """RaP orchestration corresponding to Algorithms 1 and 2 in the paper."""
+
     def __init__(
         self,
         theta,
@@ -38,6 +40,8 @@ class RaP(PPBC):
         self.autobant_epochs = autobant_epochs
 
     def _init_server(self, cfg):
+        # The trusted dataset defines the trial function used to validate both
+        # fresh and surrogate directions (Algorithm 1, lines 11 and 15).
         self.trust_df = None
         if cfg.get("trust_dataset"):
             self.trust_df = instantiate(
@@ -52,11 +56,15 @@ class RaP(PPBC):
         self.server.theta = self.theta
 
     def get_init_point(self):
-        pass  # since x^{k-1, H^{k-1}} == x^{k,0}
+        # Algorithm 1, line 6: x^(k,0) is already x^(k-1,H_(k-1)).
+        pass
 
     def get_errors_on_iter(self, itn):
+        """Build the mixed RaP update from fresh and stored directions."""
         aggregated_weights = self.server.global_model.state_dict()
 
+        # Expose the stored epoch summaries s_m to the server-side surrogate
+        # validation problem from Algorithm 1, line 11.
         if self.surrogate_sending == "jointly":
             if itn == 0 and self.round == 0:
                 self.server.final_errors = self.final_errors
@@ -74,9 +82,13 @@ class RaP(PPBC):
         self.server._init_trust_model()
 
         if self.round < self.autobant_epochs:
+            # Algorithm 1, line 15: approximately solve the trial-function argmin
+            # for pi_tilde^(k,h), the weights of the current (fresh) gradients.
             print("Now we count grad_weights")
             grad_weights = self.server._count_trust_score_manager("grad")
 
+            # Algorithm 1, line 11: approximately solve the analogous argmin for
+            # w^(k,h), the weights of the stored surrogate gradients.
             print("Now we count surrogate_weights")
             surrogate_weights = (
                 self.server._count_trust_score_manager("surrogate")
@@ -86,12 +98,16 @@ class RaP(PPBC):
             if self.round > 0:
                 surrogate_weights = self.server._check_w(surrogate_weights)
         else:
+            # After the configured optimization phase, reuse the best stored
+            # surrogate weights for the corresponding selected clients.
             surrogate_weights = self.server.best_surrogate
             grad_weights = torch.tensor([0.0] * len(self.chosen_clients))
             for i in range(len(self.chosen_clients)):
                 client = self.chosen_clients[i]
                 grad_weights[i] = surrogate_weights[client]
 
+        # Suppress a fresh direction when its stored surrogate was rejected;
+        # this is the implementation's cross-check between the two trust scores.
         print("Start validate grad weights with surrogate weights:")
         for i in range(len(grad_weights)):
             client = self.chosen_clients[i]
@@ -103,6 +119,7 @@ class RaP(PPBC):
                 )
         print("End validate")
 
+        # Restore the simplex constraint after filtering the trust weights.
         if abs(sum(grad_weights) - 1) > 1e-5 and sum(grad_weights) != 0:
             print(f"We renorm grad_weight, sum = {sum(grad_weights)}")
             grad_weights = grad_weights / sum(grad_weights)
@@ -122,7 +139,8 @@ class RaP(PPBC):
 
         print("\n\n\n")
 
-        # Add aggregated weights with surrogate gradients (we need all clients)
+        # Equation (2) and Algorithm 2, line 6: update each availability-corrected
+        # surrogate accumulator from the current client direction.
         for rank in range(self.num_clients):
             client_grad = self.server.client_gradients[rank]
             current_client_error = self.current_errors_from_clients[f"client {rank}"]
@@ -140,6 +158,8 @@ class RaP(PPBC):
                     / self.q_m
                 )
 
+                # Surrogate component of Algorithm 1, line 16:
+                # gamma * theta * sum_m w_m^(k,h) * s_m^(k-1).
                 aggregated_weights[key] = (
                     aggregated_weights[key]
                     + self.gamma
@@ -148,7 +168,8 @@ class RaP(PPBC):
                     * surrogate_weight
                 )
 
-        # add aggregated wrights with gradients of this iteration (we need only self.chosen_clients)
+        # Fresh-gradient component of Algorithm 1, line 16:
+        # gamma * (1 - theta) * sum_m pi_tilde_m^(k,h) * v_m^(k,h).
         for it in range(len(self.chosen_clients)):
             rank = self.chosen_clients[it]
             grad_weight = grad_weights[it]
@@ -165,11 +186,15 @@ class RaP(PPBC):
 
     def init_errors(self):
         if self.cur_round != 0:
+            # Algorithm 1, lines 18-19: promote the completed accumulators to
+            # stored epoch summaries for the next epoch.
             for rank in range(self.num_clients):
                 self.final_errors[f"client {rank}"] = deepcopy(
                     self.current_errors_from_clients[f"client {rank}"]
                 )
         else:
+            # Algorithm 1, line 3, and Algorithm 2, line 2: initialize all
+            # surrogate summaries and accumulators with zero tensors.
             for rank in range(self.num_clients):
                 for key, _ in self.server.global_model.state_dict().items():
                     self.current_errors_from_clients[f"client {rank}"][key] = (
@@ -184,20 +209,29 @@ class RaP(PPBC):
         pass
 
     def process_clients(self):
+        # Algorithm 1, line 7: sample the epoch duration H_k ~ Geom(p).
         self.iterations = np.random.geometric(p=self.iter_proba)
         print(f"Number of iterations for this round: {self.iterations}")
         self.init_errors()
         self.get_init_point()
         self.server.cur_round = self.round
 
+        # Algorithm 1, lines 8-17: execute the H_k inner communication rounds.
         for itn in range(self.iterations):
             print(f"start the {itn} iteration")
-            self.get_clients()  # This weights refer to PPBC with unavailible devices (Alg.2)
+            # Algorithm 2, lines 4-11: sample the client availability events used
+            # by the inverse-probability-corrected surrogate accumulators.
+            self.get_clients()
+            # Algorithm 1, line 9: the selected clients are the nonzero support
+            # of the current-round selection vector pi_hat^(k,h).
             self.chosen_clients = self.server.select_clients_to_train(
                 self.num_clients_subset
             )
             print(f"Chosen clients: {self.chosen_clients}")
+            # Algorithm 1, lines 10-13: obtain the current client directions.
             self.train_round()
+            # Algorithm 1, lines 11, 15, and 16: validate both direction sets and
+            # combine them into x^(k,h+1).
             aggregated_weights = self.get_errors_on_iter(itn)
 
             self.server.global_model.load_state_dict(aggregated_weights)
